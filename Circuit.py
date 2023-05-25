@@ -28,7 +28,7 @@ class Element(Component):
             # Examples of index of derivations and integrations
             # ['d'][0] : First derivation
             # ['d'][1] : Second derivation
-        } 
+        }
 
         self.voltage = {  # Terminal voltage = V_terminal[1] - V_terminal[0]
             'curr': 0,  # Current voltage
