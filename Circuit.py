@@ -1,77 +1,125 @@
 from __future__ import annotations
+from typing import overload
+from typing import Union, List
 
-from typing import Union
+import numpy as np
+
+import Component
+import CalcGraph
 
 
 class Circuit:
-    def __init__(self, parent: Circuit):
-        self.__parent = parent
-        self.__gnd = []
-        self.__node = []
-        self.__element = []
+    def __init__(self):
+        self.node: List[Node] = []
+        self.component: List[Component.ComponentBase] = []
 
-    def add_element(self,
-                    element: Element,
-                    node: Union[tuple[Node, Node], list[Node, Node]] = (None, None)):
-        # Check is adding available
-        if element.parent is not None:
-            raise Exception("")
+    def __getitem__(self, label: str):
+        return self.find_by_label(label)
 
-        if element in self.__element:
-            raise Exception("")
+    def find_by_label(self, target_label: str) -> None | Component.ComponentBase | Node:
+        if target_label == '':
+            return None
 
-        # Check are nodes available
+        for comp in self.component:
+            if comp.label == target_label:
+                return comp
 
-        # Add element to circuit
-        self.__element.append(element)
+        for n in self.node:
+            if n.label == target_label:
+                return n
 
-    def run(self, sim_time):
-        pass
+        return None
 
-    def rm_node(self, node):
-        self.__node.remove(node)
+    def add_node(self, n: Node) -> bool:
+        if self.find_by_label(n.label) is not None:
+            return False
 
+        self.node.append(n)
+        return True
 
-class Element:
-    def __init__(self, node: Union[tuple[Node, Node], list[Node, Node]] = (None, None)):
-        self.parent = None
-        self.__conf = {
-            'volt_supply': 0,  # Power source
-            'curr_supply': 0,
-            'resistance': 0,  # Passive circuit element
-            'inductance': 0,
-            'capacitance': 0
-        }
-        self.__node = [node[0], node[1]]
+    def remove_node(self, n: Node) -> bool:
+        if n is None:
+            return False
 
-    def __getitem__(self, item):
-        if type(item) is int:
-            return self.__node[item]
+        if type(n) != Node:
+            return False
 
-        if type(item) is str:
-            return self.__conf[item]
+        self.node.remove(n)
+        return True
 
-    def __setitem__(self, key, value):
-        if type(key) is int:
-            if self.__node[key] is not None:
-                self.__node[key].remove(self)
-            self.__node[key] = value
+    def add_component(self, comp: Component.ComponentBase) -> bool:
+        if self.find_by_label(comp.label) is not None:
+            return False
 
-        if type(key) is str:
-            self.__conf[key] = value
+        self.component.append(comp)
+        return True
+
+    def remove_component(self, comp: Component.ComponentBase) -> bool:
+        # Detach from circuit
+        node_buf = comp.pin.copy()
+        for i in range(len(comp.pin)):
+            comp.pin[i] = None
+
+        # Remove component from nodes
+        for i in range(len(node_buf)):
+            node_buf[i].remove_component_if_not_connected(comp)
+
+        self.component.remove(comp)
+        del comp
+        return True
+
+    def remove_component_by_label(self, label: str) -> bool:
+        comp = self.find_by_label(label)
+        if comp is None:
+            return False
+
+        return self.remove_component(comp)
 
 
 class Node:
-    def __init__(self, parent: Circuit):
-        self.__parent = parent
-        self.__component = []
+    def __init__(self, parent: Circuit, init_comp: Component.ComponentBase):
+        self.label = ''
+        self.parent = parent
+        self.component: List[Component.ComponentBase] = [init_comp]
 
-    def append(self, comp: Element, node_idx: int):
-        self.__component.append(comp)
-        comp[node_idx] = self
+        self.prev_voltage = CalcGraph.Number(np.NaN)
 
-    def remove(self, comp):
-        self.__component.remove(comp)
+        parent.add_node(self)
 
-        if len(self.__component) == 0:
-            self.__parent.rm_node(self)
+    def set_label(self, new_label: str):
+        if self.parent.find_by_label(new_label) is not None:
+            return False
+
+        self.label = new_label
+        return True
+
+    def connect(self, n: Node):
+        n.component += self.component
+        n.component = list(set(n.component))
+
+        for comp in self.component:
+            for pin_idx in range(len(comp.pin)):
+                if comp.pin[pin_idx] is self:
+                    comp.pin[pin_idx] = n
+
+        self.parent.remove_node(self)
+        del self
+
+    def merge_with(self, n: Node):
+        self.connect(n)
+
+    def remove_component_if_not_connected(self, comp: Component.ComponentBase) -> bool:
+        for p in comp.pin:
+            if p is self:
+                # Still connected with component
+                return False
+
+        self.component.remove(comp)
+        if len(self.component) == 0:
+            del self
+
+        return True
+
+    def update_component_list(self):
+        for comp in self.component:
+            self.remove_component_if_not_connected(comp)
