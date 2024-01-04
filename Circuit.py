@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import overload
-from typing import Union, List
+from typing import List, Tuple
 
 import numpy as np
 
@@ -9,7 +9,8 @@ import CalcGraph
 
 
 class Circuit:
-    def __init__(self):
+    def __init__(self, parent: Component.PackageBase = None):
+        self.parent = parent
         self.node: List[Node] = []
         self.component: List[Component.ComponentBase] = []
 
@@ -75,6 +76,26 @@ class Circuit:
 
         return self.remove_component(comp)
 
+    def unfold(self) -> Tuple[List[Node], List[Component.ElementBase]]:
+        node: List[Node] = self.node.copy()
+        element: List[Component.ElementBase] = []
+
+        for comp in self.component:
+            if issubclass(type(comp), Component.PackageBase):
+                comp: Component.PackageBase
+                _node, _element = comp.circuit.unfold()
+
+                node += _node
+                element += _element
+            else:
+                comp: Component.ElementBase
+                element.append(comp)
+
+        node = [n.get_highest_level_node() for n in node]
+        node = list(set(node))
+
+        return node, element
+
 
 class Node:
     def __init__(self, parent: Circuit, init_comp: Component.ComponentBase):
@@ -123,3 +144,21 @@ class Node:
     def update_component_list(self):
         for comp in self.component:
             self.remove_component_if_not_connected(comp)
+
+    def get_highest_level_node(self) -> Node:
+        parent_circuit = self.parent
+        parent_component = parent_circuit.parent
+
+        if parent_component is None:  # This node belongs highest level circuit
+            return self
+
+        try:
+            pin_idx = parent_component.inner_pin.index(self)
+
+            # Connected with high level circuit through pin
+            return parent_component.pin[pin_idx].get_highest_level_node()
+        except ValueError:  # Not connected with higher level circuit with pin
+            return self
+
+    def get_prev_voltage(self):
+        return self.get_highest_level_node().prev_voltage

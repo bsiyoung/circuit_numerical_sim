@@ -9,6 +9,25 @@ import Circuit
 import CalcGraph
 
 
+"""
+ComponentBase
+ ├─ IdealGround
+ ├─ ElementBase
+ │   ├─ IdealVoltageSource
+ │   ├─ IdealCurrentSource
+ │   ├─ IdealResistor
+ │   ├─ IdealCapacitor
+ │   └─ IdealInductor
+ └─ PackageBase
+     ├─ Ground
+     ├─ VoltageSource
+     ├─ CurrentSource
+     ├─ Resistor
+     ├─ Capacitor
+     └─ Inductor
+"""
+
+
 class ComponentBase:
     def __init__(self,
                  parent: Circuit.Circuit,
@@ -35,16 +54,16 @@ class ComponentBase:
             self.reset_pin(pin_idx)
 
 
-class GroundElement(ComponentBase):
+class IdealGround(ComponentBase):
     def __init__(self, parent: Circuit.Circuit, label: str = ''):
         super().__init__(parent=parent, n_pin=1, label=label)
 
 
 class ElementBase(ComponentBase):
-    def __init__(self, value: CalcGraph.Number, parent: Circuit.Circuit, label: str = ''):
-        super().__init__(parent=parent, n_pin=2, label=label)
+    def __init__(self, parent: Circuit.Circuit, value: CalcGraph.Number, n_pin=2, label: str = ''):
+        super().__init__(parent=parent, n_pin=n_pin, label=label)
 
-        self.value = value
+        self.value: CalcGraph.Number = value
         self.prev_current = CalcGraph.Number(np.NaN)
 
     def set_value(self, value: RealNumber):
@@ -76,7 +95,7 @@ class IdealVoltageSource(ElementBase):
 
     @overrides
     def get_constant(self, dt):
-        return -self.value
+        return self.value
 
 
 class IdealCurrentSource(ElementBase):
@@ -92,7 +111,7 @@ class IdealCurrentSource(ElementBase):
 
     @overrides
     def get_constant(self, dt):
-        return -self.value
+        return self.value
 
 
 class IdealResistor(ElementBase):
@@ -133,7 +152,11 @@ class IdealCapacitor(ElementBase):
 
     @overrides
     def get_constant(self, dt):
-        return -(self.pin[0].prev_voltage - self.pin[1].prev_voltage)
+        volt_diff = self.pin[0].prev_voltage - self.pin[1].prev_voltage
+        if np.isnan(volt_diff.value):
+            return self.init_voltage
+
+        return volt_diff
 
 
 class IdealInductor(ElementBase):
@@ -158,7 +181,7 @@ class IdealInductor(ElementBase):
 
     @overrides
     def get_constant(self, dt):
-        return self.prev_current
+        return -self.prev_current
 
 
 class PackageBase(ComponentBase):
@@ -168,14 +191,29 @@ class PackageBase(ComponentBase):
                  label: str = ''):
         super().__init__(parent=parent, n_pin=n_pin, label=label)
         self.parent = parent
-        self._pin: List[None | Circuit.Node] = [None for i in range(n_pin)]
-        self.circuit = Circuit.Circuit()
+        self.inner_pin: List[None | Circuit.Node] = [None for i in range(n_pin)]
+        self.circuit = Circuit.Circuit(parent=self)
 
-    def __getitem__(self, label: str):
+    def __getitem__(self, label: str) -> None | Circuit.Node | ElementBase | PackageBase:
         return self.circuit[label]
 
     def update(self) -> None:
         return
+
+
+class Ground(PackageBase):
+    def __init__(self,
+                 parent: Circuit.Circuit,
+                 r: RealNumber = 1e+9,
+                 label: str = ''):
+        super().__init__(parent=parent, n_pin=1, label=label)
+
+        r = IdealResistor(self.circuit, r, 'R')
+        gnd = IdealGround(self.circuit, 'GND')
+
+        r.pin[1].connect(gnd.pin[0])
+
+        self.inner_pin[0] = r.pin[0]
 
 
 class VoltageSource(PackageBase):
@@ -186,13 +224,13 @@ class VoltageSource(PackageBase):
                  label: str = ''):
         super().__init__(parent=parent, n_pin=2, label=label)
 
-        v = IdealVoltageSource(self.circuit, v_th, 'v_th')
-        r = IdealResistor(self.circuit, r_th, 'r_th')
-
-        self._pin[0] = v.pin[0]
-        self._pin[1] = r.pin[1]
+        v = IdealVoltageSource(self.circuit, v_th, 'V_th')
+        r = IdealResistor(self.circuit, r_th, 'R_th')
 
         v.pin[1].connect(r.pin[0])
+
+        self.inner_pin[0] = v.pin[0]
+        self.inner_pin[1] = r.pin[1]
 
 
 class Resistor(PackageBase):
@@ -204,5 +242,5 @@ class Resistor(PackageBase):
 
         r = IdealResistor(self.circuit, r, 'R')
 
-        self._pin[0] = r.pin[0]
-        self._pin[1] = r.pin[1]
+        self.inner_pin[0] = r.pin[0]
+        self.inner_pin[1] = r.pin[1]
